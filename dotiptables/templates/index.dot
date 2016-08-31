@@ -1,0 +1,44 @@
+/*
+ * This represents the relationship between chains in the
+ *  table.  To generate an SVG diagram from this
+ * file, install GraphViz (http://www.graphviz.org/) and 
+ * then run:
+ *
+ * dot -T svg -o index.svg index.dot
+ *
+ */
+digraph table_nat_PREROUTING {
+  rankdir=LR;
+
+  "packet-in"
+  "packet-out"
+  "machine"
+  "routing table"
+  "raw-PREROUTING" [URL="raw-PREROUTING.svg"]
+  "mangle-PREROUTING" [URL="mangle-PREROUTING.svg"]
+  "nat-PREROUTING" [URL="nat-PREROUTING.svg"]
+  "mangle-POSTROUTING" [URL="mangle-POSTROUTING.svg"]
+  "nat-POSTROUTING" [URL="nat-POSTROUTING.svg"]
+  "filter-INPUT" [URL="filter-INPUT.svg"]
+  "mangle-INPUT" [URL="mangle-INPUT.svg"]
+  "filter-OUTPUT" [URL="filter-OUTPUT.svg"]
+  "raw-OUTPUT" [URL="raw-OUTPUT.svg"]
+  "mangle-OUTPUT" [URL="mangle-OUTPUT.svg"]
+  "nat-OUTPUT" [URL="nat-OUTPUT.svg"]
+  "filter-FORWARD" [URL="filter-FORWARD.svg"]
+  "mangle-FORWARD" [URL="mangle-FORWARD.svg"]
+  node [shape=plaintext];
+  1 -> 2 -> 3 -> 4
+  
+  { rank = same; "1"; "packet-in"; "raw-PREROUTING"; "mangle-PREROUTING"; "nat-PREROUTING"; "mangle-INPUT"; "filter-INPUT"; }
+  { rank = same; "2"; "mangle-FORWARD"; "machine"; }
+  { rank = same; "3"; "filter-FORWARD"; "routing table"; }
+  { rank = same; "4"; "raw-OUTPUT"; "mangle-OUTPUT"; "nat-OUTPUT"; "filter-OUTPUT"; "mangle-POSTROUTING"; "nat-POSTROUTING"; "packet-out"}
+
+  "packet-in" -> "raw-PREROUTING" -> "mangle-PREROUTING" -> "nat-PREROUTING" -> "mangle-INPUT" -> "filter-INPUT"
+  "nat-PREROUTING" -> "mangle-FORWARD" -> "filter-FORWARD" -> "mangle-POSTROUTING"
+  "raw-OUTPUT" -> "mangle-OUTPUT" -> "nat-OUTPUT" -> "filter-OUTPUT" -> "mangle-POSTROUTING" -> "nat-POSTROUTING" -> "packet-out"
+  "filter-INPUT" -> "machine" [label="packet input"]
+  "machine" -> "routing table" [label="packet output"]
+  "routing table" -> "raw-OUTPUT"
+}

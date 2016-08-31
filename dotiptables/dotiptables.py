@@ -21,7 +21,7 @@ re_table = re.compile(re_table)
 re_chain='''^:(?P<chain>\S+) (?P<policy>\S+) (?P<counters>\S+)'''
 re_chain = re.compile(re_chain)
 
-re_rule='''^-A (?P<chain>\S+)( (?P<conditions>.*))?( -j (?P<target>\S*))?( (?P<extra>.*))?'''
+re_rule='''^-A (?P<chain>\S+)( (?P<conditions>.*))?( -[jg] (?P<target>.*))'''
 re_rule = re.compile(re_rule)
 
 re_commit='''^COMMIT'''
@@ -29,6 +29,92 @@ re_commit=re.compile(re_commit)
 
 re_comment='''^#(?P<comment>.*)'''
 re_comment=re.compile(re_comment)
+
+default_chain=['PREROUTING', 'POSTROUTING', 'INPUT', 'OUTPUT', 'FORWARD']
+
+def is_final_target(target):
+    return target.split()[0] in ['ACCEPT', 'DROP', 'REJECT', 'MASQUERADE', 'DNAT', 'SNAT', 'RETURN', 'MARK']
+
+def process_rules(iptables, table, target_list, process_chain):
+    flow_list=[]
+    rule_condition={}
+    while target_list:
+        chain = target_list.pop(0)
+        if chain not in process_chain:
+            for i, cur_rule in enumerate(iptables[table][chain]['rules']):
+                if cur_rule['chain'] not in rule_condition.keys():
+                    rule_condition[cur_rule['chain']]={}
+                rule_condition[cur_rule['chain']][i]=cur_rule['conditions']
+                target_rule = cur_rule['target']  if is_final_target(cur_rule['target']) else cur_rule['target']+':name:w'
+                flow_list.append([cur_rule['chain']+':R'+str(i)+':e',target_rule])
+                if cur_rule['target'] not in target_list and not is_final_target(cur_rule['target']):
+                    target_list.append(cur_rule['target'])
+            process_chain.append(chain)
+    if target_list:
+        (tmpflow, tmprule, tmppro) = process_rules(iptables, table, target_list, process_chain)
+        flow_list.extend(tmpflow)
+        rule_condition.update(tmprule)
+        process_chain.extend(tmppro)
+    return flow_list, rule_condition, process_chain
+
+def render_dot(output_file, iptables, table, chain):
+    content_list = []
+    content_list.append('/*')
+    content_list.append(' * This represents the relationship between chains in the')
+    content_list.append(' * {{table}} table.  To generate an SVG diagram from this')
+    content_list.append(' * file, install GraphViz (http://www.graphviz.org/) and ')
+    content_list.append(' * then run:')
+    content_list.append(' *')
+    content_list.append(' * dot -T svg -o %s.svg %s.dot' % ((table+'-'+chain), (table+'-'+chain)))
+    content_list.append(' *')
+    content_list.append(' */')
+    content_list.append('digraph table_%s {' % (table+'_'+chain))
+    content_list.append('  rankdir=LR;')
+    content_list.append('')
+
+    # add default policy to last rule
+    if iptables[table][chain]['policy']:
+        iptables[table][chain]['rules'].append({'conditions': '', 'target': iptables[table][chain]['policy'], 'chain': chain})
+    (flow_list, rule_conditions, prochian) = process_rules(iptables, table, [chain], [])
+
+    # add node
+    result_list = []
+    rule_list = []
+    for rules in flow_list:
+        for rule in rules:
+            if is_final_target(rule):
+                result_list.append(rule)
+            else:
+                ori_rule_name = rule.split(":")[0]
+                if ori_rule_name not in rule_list:
+                    table_context=[]
+                    table_context.append('<<table border="0" cellborder="1" cellspacing="0"><tr><td bgcolor="lightgrey" PORT="name">%s</td></tr>' % ori_rule_name.ljust(int(len(ori_rule_name)*1.5)))
+                    if ori_rule_name in rule_conditions.keys():
+                        for k, v in rule_conditions[ori_rule_name].items():
+                            table_context.append('<tr><td PORT="R%s">%s</td></tr>' % (str(k), v.ljust(int(len(v)*1.5))))
+                    table_context.append('</table>>];')
+                    content_list.append('  "%s" [URL="%s/%s.html",shape=none,margin=0,label=' % (ori_rule_name.replace('"','\\"'), table, ori_rule_name.replace('"','\\"'))+'\n'.join(table_context))
+                    rule_list.append(ori_rule_name)
+    content_list.append('')
+    # add result node
+    for rt in result_list:
+        content_list.append('  "%s"' % rt)
+    content_list.append('')
+
+    # sorting
+    content_list.append('{rank=same; "'+'" "'.join(result_list)+'"}')
+
+    # add edge
+    for flows in flow_list:
+        (sflow_s, sflow_e) = flows[0].split(":",1)
+        if is_final_target(flows[1]):
+            content_list.append('"'+sflow_s+'":'+sflow_e+' -> "'+flows[1]+'"')
+        else:
+            (eflow_s, eflow_e) = flows[1].split(":",1)
+            content_list.append('"'+sflow_s+'":'+sflow_e+' -> "'+eflow_s+'":'+eflow_e)
+    content_list.append('}')
+    with open(output_file, "wb") as f:
+        f.write('\n'.join(content_list)+'\n')
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -53,16 +139,12 @@ def handle_chain(iptables, mo, line):
 
     iptables['_table'][mo.group('chain')] = {
             'policy': policy,
-            'rules': [],
-            'targets': set(),
+            'rules': []
             }
 
 def handle_rule(iptables, mo, line):
     fields = dict( (k, v if v else '') for k,v in mo.groupdict().items())
     iptables['_table'][fields['chain']]['rules'].append(fields)
-
-    if mo.group('target') and not mo.group('target').isupper():
-        iptables['_table'][fields['chain']]['targets'].add(mo.group('target'))
 
 def handle_commit(iptables, mo, line):
     iptables['_table'] = None
@@ -130,21 +212,35 @@ def output_dot_table(iptables, opts, table):
             ))
         fd.write('\n')
 
+def output_dot_table_chain(iptables, opts, table, chain):
+    render_dot(os.path.join(opts.outputdir, '%s.dot' % (table+'-'+chain)), iptables, table, chain)
+
 def output_dot(iptables, opts):
     tmpl = env.get_template('index.html')
+    tb_list=[]
     with open(os.path.join(opts.outputdir, 'index.html'), 'w') as fd:
-        fd.write(tmpl.render(tables=iptables.keys()))
-
-    for table in iptables:
-        output_dot_table(iptables, opts, table)
-        continue
+        for chain in default_chain:
+            for table in iptables.keys():
+                if chain in iptables[table].keys():
+                    output_dot_table_chain(iptables, opts, table, chain)
+                    tb_list.append(table+'-'+chain)
+        fd.write(tmpl.render(tables=tb_list))
+    tmpl = env.get_template('index.dot')
+    with open(os.path.join(opts.outputdir, 'index.dot'), 'w') as fd:
+        fd.write(tmpl.render())
+    p = subprocess.Popen(['dot', '-T', 'svg', '-o',
+            os.path.join(opts.outputdir, '%s.svg' % 'index'),
+            os.path.join(opts.outputdir, '%s.dot' % 'index')])
+    p.communicate()
 
 def render_svg(iptables, opts):
-    for table in iptables:
-        p = subprocess.Popen(['dot', '-T', 'svg', '-o',
-                os.path.join(opts.outputdir, '%s.svg' % table),
-                os.path.join(opts.outputdir, '%s.dot' % table)])
-        p.communicate()
+    for chain in default_chain:
+        for table in iptables.keys():
+            if chain in iptables[table].keys():
+                p = subprocess.Popen(['dot', '-T', 'svg', '-o',
+                        os.path.join(opts.outputdir, '%s.svg' % (table+'-'+chain)),
+                        os.path.join(opts.outputdir, '%s.dot' % (table+'-'+chain))])
+                p.communicate()
 
 def main():
     opts = parse_args()
