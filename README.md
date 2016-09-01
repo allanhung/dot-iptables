@@ -7,3 +7,11 @@ the given chain.
 
 [dot]: http://www.graphviz.org/
 
+# Run with Docker 
+
+```
+git clone https://github.com/allanhung/dot-iptables
+cd dot-iptables
+docker build -t dot-iptables .
+docker run --privileged --name=dotiptables --rm -p 8000:8000 dot-iptables
+```

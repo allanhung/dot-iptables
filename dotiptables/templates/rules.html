@@ -14,13 +14,13 @@
     </style>
 	</head>
 	<body>
-  <p>[ <a href="../{{table}}.svg">graph</a> ]</p>
+  <p>[ <a href="../{{table}}-{{chain}}.svg">graph</a> ]</p>
     <pre class="iptables">
 {% for rule in rules -%}
 {% if rule.target is upper -%}
--A {{rule.chain}} {{rule.conditions}} -j <span class="builtin">{{ rule.target }}</span> {{ rule.extra }}
+-A {{rule.chain}} {{rule.conditions}} -j <span class="builtin">{{ rule.target }}</span>
 {% else -%}
--A {{rule.chain}} {{rule.conditions}} -j <a href="{{rule.target}}.html">{{ rule.target }}</a> {{ rule.extra }}
+-A {{rule.chain}} {{rule.conditions}} -j <a href="{{rule.target}}.html">{{ rule.target }}</a>
 {% endif -%}
 {% endfor %}
 {% if policy %}

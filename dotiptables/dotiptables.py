@@ -180,11 +180,7 @@ def read_chains(input):
     return iptables
 
 def output_rules(iptables, opts):
-    tmpl = env.get_template('rules.html')
     for table, chains in iptables.items():
-        if table.startswith('_'):
-            continue
-
         dir = os.path.join(opts.outputdir, table)
         try:
             os.mkdir(dir)
@@ -193,14 +189,38 @@ def output_rules(iptables, opts):
                 pass
             else:
                 raise
-
         for chain, data in chains.items():
+            html_context=[]
+            html_context.append('<?xml version="1.0" encoding="UTF-8"?>')
+            html_context.append('<!DOCTYPE tml PUBLIC "-//W3C//DTD XHTML 1.1//EN"')
+            html_context.append('"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">')
+            html_context.append('<html xmlns="http://www.w3.org/1999/xhtml"')
+            html_context.append('  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"')
+            html_context.append('  xsi:schemaLocation="http://www.w3.org/MarkUp/SCHEMA/xhtml11.xsd"')
+            html_context.append('  xml:lang="en">')
+            html_context.append('  <head>')
+            html_context.append('    <title>%s</title>' % chain)
+            html_context.append('    <style>')
+            html_context.append('    .builtin {')
+            html_context.append('    color: red;')
+            html_context.append('    }')
+            html_context.append('    </style>')
+            html_context.append('  </head>')
+            html_context.append('  <body>')
+            html_context.append('  <p>[ <A HREF="javascript:javascript:history.go(-1)">previous page</A> ]</p>')
+            html_context.append('    <pre class="iptables">')
+            for rule in data['rules']:
+                if is_final_target(rule['target']):
+                    html_context.append('-A %s %s -j <span class="builtin">%s</span>' % (rule['chain'], rule['conditions'], rule['target']))
+                else:
+                    html_context.append('-A %s %s -j <a href="%s.html">%s</a>' %(rule['chain'], rule['conditions'], rule['target'], rule['target']))
+            if data['policy']:
+                html_context.append('(default <span class="builtin">%s</span>)' % data['policy'])
+            html_context.append('    </pre>')
+            html_context.append('  </body>')
+            html_context.append('</html>')
             with open(os.path.join(dir, '%s.html' % chain), 'w') as fd:
-                fd.write(tmpl.render(
-                    table=table,
-                    chain=chain,
-                    rules=data['rules'],
-                    policy=data['policy']))
+                fd.write('\n'.join(html_context)+'\n')
 
 def output_dot_table(iptables, opts, table):
     tmpl = env.get_template('table.dot')
